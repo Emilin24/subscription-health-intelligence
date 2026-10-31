@@ -64,8 +64,12 @@ export default function Layout() {
         : customerLinks;
 
   async function logout() {
-    await signOut();
-    nav('/login', { replace: true });
+    try {
+      await signOut();
+      nav('/login', { replace: true });
+    } catch (error) {
+      console.error('Sign out failed:', error);
+    }
   }
 
   return (
@@ -118,7 +122,11 @@ export default function Layout() {
           </div>
         )}
 
-        <button className="logout" onClick={logout}>
+        <button
+          type="button"
+          className="logout"
+          onClick={logout}
+        >
           <LogOut size={17} />
           Sign out
         </button>
@@ -167,4 +175,3 @@ export default function Layout() {
     </div>
   );
 }
-
