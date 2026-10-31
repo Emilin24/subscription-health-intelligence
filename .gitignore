@@ -1,8 +1,110 @@
+# ==========================================
+# Environment variables and secrets
+# ==========================================
 .env
-.venv/
-venv/
-node_modules/
-dist/
+.env.*
+!.env.example
+!.env.sample
+
+# Supabase credentials
+supabase/.env
+
+# ==========================================
+# Python / FastAPI backend
+# ==========================================
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Python packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Testing and coverage
 .pytest_cache/
-*.pyc
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Type checking and linting
+.mypy_cache/
+.pyright/
+.ruff_cache/
+
+# ==========================================
+# Node.js / React frontend
+# ==========================================
+node_modules/
+frontend/node_modules/
+
+# Vite build output
+dist/
+frontend/dist/
+
+# Vite cache
+.vite/
+
+# ==========================================
+# IDEs and editors
+# ==========================================
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+.idea/
+*.suo
+*.user
+*.code-workspace
+
+# ==========================================
+# Operating system files
+# ==========================================
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ==========================================
+# Logs and temporary files
+# ==========================================
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+
+# ==========================================
+# Database backups and local data
+# ==========================================
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+*.backup
+
+# ==========================================
+# Generated files
+# ==========================================
+*.zip
+coverage/
+.parcel-cache/
+
+# ==========================================
+# Local environment files
+# ==========================================
+.python-version

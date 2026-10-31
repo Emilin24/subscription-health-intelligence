@@ -1,33 +1,21 @@
-from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from apscheduler.schedulers.background import BackgroundScheduler
-from app.core.config import get_settings
-from app.api.routes.health import router
-from app.services.health_service import recalculate_all
+from app.config import settings
+from app.routes import auth, admin, catalogue, sales, billing, portal, health, reports
 
-settings = get_settings()
-scheduler = BackgroundScheduler(timezone="UTC")
-
-@asynccontextmanager
-async def lifespan(app):
-    if settings.enable_scheduler:
-        scheduler.add_job(recalculate_all, "cron", hour=settings.scheduler_hour_utc,
-                          id="daily-health-recalculation", replace_existing=True)
-        scheduler.start()
-    yield
-    if scheduler.running:
-        scheduler.shutdown()
-
-app = FastAPI(title="Subscription Health Intelligence API", version="1.0.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins,
-                   allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
-app.include_router(router, prefix="/api")
+app=FastAPI(title="Brightloop Subscription Management API",version="1.0.0")
+s=settings()
+app.add_middleware(
+    CORSMiddleware,allow_origins=s.origins,allow_credentials=True,
+    allow_methods=["*"],allow_headers=["*"]
+)
+for router in [auth.router,admin.router,catalogue.router,sales.router,billing.router,portal.router,health.router,reports.router]:
+    app.include_router(router,prefix="/api")
 
 @app.get("/")
-def root():
-    return {"service": "Subscription Health Intelligence API", "docs": "/docs"}
+async def root():
+    return {"name":"Brightloop Subscription Management API","docs":"/docs"}
 
-@app.get("/healthz")
-def healthz():
-    return {"status": "ok"}
+@app.get("/api/healthcheck")
+async def healthcheck():
+    return {"status":"ok"}

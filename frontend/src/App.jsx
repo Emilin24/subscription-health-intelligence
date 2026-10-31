@@ -1,54 +1,39 @@
-import { useEffect, useState } from "react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
-import { supabase } from "./lib/supabase";
-import Landing from "./pages/Landing";
-import Login from "./pages/Login";
-import Signup from "./pages/Signup";
-import Dashboard from "./pages/Dashboard";
+import {BrowserRouter,Routes,Route,Navigate} from 'react-router-dom'
+import {AuthProvider,useAuth} from './context/AuthContext'
+import Protected from './components/Protected'
+import Layout from './components/Layout'
+import Landing from './pages/Landing'
+import {Login,Signup} from './pages/Auth'
+import {Dashboard,CataloguePage,Subscriptions,Billing,Quotations,Health,Reports,Portal} from './pages/Workspace'
+import './styles.css'
 
-function AppRoutes() {
-  const [session, setSession] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let mounted = true;
-
-    supabase.auth.getSession().then(({ data, error }) => {
-      if (!mounted) return;
-      if (error) console.error("Could not retrieve session:", error.message);
-      setSession(data?.session ?? null);
-      setLoading(false);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession);
-    });
-
-    return () => {
-      mounted = false;
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  if (loading) {
-    return <div className="page-loading"><div className="loading-spinner" />Checking your session…</div>;
-  }
-
-  return (
-    <Routes>
-      <Route path="/" element={<Landing session={session} />} />
-      <Route path="/login" element={session ? <Navigate to="/dashboard" replace /> : <Login />} />
-      <Route path="/signup" element={session ? <Navigate to="/dashboard" replace /> : <Signup />} />
-      <Route path="/dashboard" element={session ? <Dashboard session={session} /> : <Navigate to="/login" replace />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
-  );
+function HomeRedirect(){
+ const {profile,loading}=useAuth()
+ if(loading)return <div className="loading">Loading…</div>
+ return <Navigate to={!profile?'/':profile.role==='customer'?'/portal':'/dashboard'} replace/>
 }
-
-export default function App() {
-  return (
-    <BrowserRouter>
-      <AppRoutes />
-    </BrowserRouter>
-  );
-}
+function AppRoutes(){return <Routes>
+ <Route path="/" element={<Landing/>}/>
+ <Route path="/login" element={<Login/>}/>
+ <Route path="/signup" element={<Signup/>}/>
+ <Route element={<Protected/>}>
+  <Route element={<Layout/>}>
+   <Route path="/dashboard" element={<Protected roles={['admin','staff']}/> }><Route index element={<Dashboard/>}/></Route>
+   <Route path="/products" element={<Protected roles={['admin','staff']}/> }><Route index element={<CataloguePage kind="products"/>}/></Route>
+   <Route path="/plans" element={<Protected roles={['admin','staff']}/> }><Route index element={<CataloguePage kind="plans"/>}/></Route>
+   <Route path="/customers" element={<Protected roles={['admin','staff']}/> }><Route index element={<CataloguePage kind="customers"/>}/></Route>
+   <Route path="/taxes" element={<Protected roles={["admin","staff"]}/> }><Route index element={<CataloguePage kind="taxes"/>}/></Route>
+   <Route path="/discounts" element={<Protected roles={['admin','staff']}/> }><Route index element={<CataloguePage kind="discounts"/>}/></Route>
+   <Route path="/subscriptions" element={<Protected roles={['admin','staff']}/> }><Route index element={<Subscriptions/>}/></Route>
+   <Route path="/quotations" element={<Protected roles={['admin','staff']}/> }><Route index element={<Quotations/>}/></Route>
+   <Route path="/invoices" element={<Protected roles={['admin','staff']}/> }><Route index element={<Billing/>}/></Route>
+   <Route path="/payments" element={<Protected roles={['admin','staff']}/> }><Route index element={<Billing/>}/></Route>
+   <Route path="/health" element={<Protected roles={['admin','staff']}/> }><Route index element={<Health/>}/></Route>
+   <Route path="/reports" element={<Protected roles={['admin','staff']}/> }><Route index element={<Reports/>}/></Route>
+   <Route path="/portal" element={<Protected roles={['customer']}/> }><Route index element={<Portal/>}/></Route>
+  </Route>
+ </Route>
+ <Route path="/home" element={<HomeRedirect/>}/>
+ <Route path="*" element={<Navigate to="/home" replace/>}/>
+ </Routes>}
+export default function App(){return <BrowserRouter><AuthProvider><AppRoutes/></AuthProvider></BrowserRouter>}

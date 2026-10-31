@@ -1,57 +1,114 @@
-# Subscription Health Intelligence
+# Brightloop Subscription Management System
 
-Full-stack subscription health scoring module for an existing subscription-management system.
+A full-stack MVP for the Brightloop subscription-management brief.
 
-**Stack:** React + Vite + Tailwind + Recharts | FastAPI + Python | Supabase PostgreSQL + Auth.
+## Stack
+- Frontend: React + Vite + React Router + plain CSS
+- Backend: FastAPI + HTTPX
+- Database/Auth: Supabase PostgreSQL + Supabase Auth
 
-## Features
-- Weighted, explainable health score (0–100).
-- Five factors: payment reliability (30%), renewal behaviour (25%), subscription activity (20%), payment timeliness (15%), stability (10%).
-- Risk reasons, recommended actions, score history, dashboard filters and summary.
-- Supabase Auth login; backend verifies the access token and requires `admin` or `staff` profile role.
-- Optional daily recalculation scheduler.
+## Important database prerequisite
+This project targets the **existing Supabase project after applying**
+`brightloop_existing_project_migration.sql` supplied earlier in this conversation.
+The application does not run SQL migrations automatically.
 
-## Setup
-### Supabase
-Run `supabase/migrations/001_subscription_health.sql` in the Supabase SQL Editor. It contains starter tables for customers, subscriptions, invoices and payments plus health tables. If your project already has core tables, adapt the migration and queries to your existing column names; do not recreate existing tables blindly.
+The migration must have completed successfully. It adds the new catalogue,
+quotation, line-item and customer-request tables while retaining the existing
+health-scoring tables and legacy columns (`customers.name`, `invoices.total`,
+`payments.method`, `subscriptions.end_date`, etc.).
 
-Create a Supabase Auth user and insert a matching `profiles` row with role `admin` or `staff`.
+## 1. Backend setup (Windows PowerShell)
 
-### Backend
-```bash
+```powershell
 cd backend
-python -m venv .venv
-# Windows: .venv\\Scripts\\Activate.ps1
-# macOS/Linux: source .venv/bin/activate
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-copy .env.example .env
-# Fill SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
-uvicorn app.main:app --reload
+Copy-Item .env.example .env
 ```
+
+Fill in `backend/.env`:
+
+```env
+SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+SUPABASE_ANON_KEY=YOUR_SUPABASE_PUBLISHABLE_OR_ANON_KEY
+SUPABASE_SERVICE_ROLE_KEY=YOUR_SUPABASE_SECRET_OR_SERVICE_ROLE_KEY
+CORS_ORIGINS=http://localhost:5173
+```
+
+The service-role key is backend-only. Never place it in `frontend/.env`,
+commit it, or share it.
+
+Start the API from the `backend` directory:
+
+```powershell
+python -m uvicorn app.main:app --reload
+```
+
 API docs: http://127.0.0.1:8000/docs
 
-### Frontend
-```bash
+## 2. Frontend setup (second terminal)
+
+```powershell
 cd frontend
 npm install
-copy .env.example .env
-# Fill VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
+Copy-Item .env.example .env
 npm run dev
 ```
-Set `VITE_API_BASE_URL=http://127.0.0.1:8000/api` in frontend `.env`.
 
-## API
-All `/api/health` endpoints require `Authorization: Bearer <Supabase access token>`.
-- `GET /api/health/summary`
-- `GET /api/health/subscriptions?search=&status=`
-- `GET /api/health/subscriptions/{id}`
-- `POST /api/health/subscriptions/{id}/recalculate`
-- `POST /api/health/recalculate-all`
-- `GET /api/health/subscriptions/{id}/history`
+Set the Vite Supabase URL and publishable/anon key in `frontend/.env`.
+Do not use the service-role key in the frontend.
 
-## Important
-- Never expose or commit the Supabase service-role key. It belongs only in backend `.env`.
-- This is an integration-ready starter module, not a replacement for your full subscription system.
-- Scores are operational risk indicators, not validated churn predictions. Calibrate weights against real outcomes.
-- Do not automatically suspend or cancel customers solely based on a health score.
-- Before production, add rate limiting, monitoring, audit logs, stricter CORS settings and business-timezone handling.
+Frontend: http://localhost:5173
+
+## 3. First admin account
+1. Create your account through the app's Sign up page.
+2. The database signup trigger should create a `profiles` row with role
+   `customer` and a linked customer record.
+3. In Supabase SQL Editor, promote that account to admin:
+
+```sql
+UPDATE public.profiles
+SET role = 'admin', customer_id = NULL
+WHERE id = (
+  SELECT id FROM auth.users WHERE email = 'YOUR_EMAIL@example.com'
+);
+```
+
+4. Sign out and sign back in. Admin dashboard routes should now be available.
+
+Only an admin can create staff users through the app.
+
+## 4. Included features
+- Supabase Auth signup/signin/signout and protected routes
+- Admin/staff/customer role handling
+- Product, plan, tax and discount management
+- Quotations and quotation-to-subscription conversion
+- Subscription management and customer portal
+- Invoice generation from active subscriptions (manual billing run)
+- Invoice status, payment recording and outstanding balance tracking
+- Subscription Health Score API/UI using payment, renewal, activity,
+  timeliness and stability dimensions
+- Revenue, overdue and subscription reports
+- Basic backend tests and seed/demo instructions
+
+## 5. Billing behavior
+This MVP generates invoices when an admin/staff member calls the billing-run
+endpoint or presses **Run billing**. It does not silently run a background
+scheduler. For deployment, schedule the endpoint through a trusted scheduler
+or add a worker (Celery/ARQ/cron) and protect the billing-run endpoint.
+The billing engine checks `next_billing_date` and avoids a duplicate invoice
+for the same subscription and invoice date.
+
+Payments are recorded manually. No live card gateway is configured.
+
+## 6. Security notes
+- The backend validates Supabase access tokens using Supabase Auth.
+- The backend uses a server-side service-role key for database operations,
+  so API ownership and role checks are mandatory. The included routes enforce
+  these checks. Supabase RLS remains an additional defense for direct client
+  queries.
+- Do not expose the service-role key to React.
+- Before production, add rate limiting, audit logging, email delivery,
+  background billing, payment gateway integration, backups and deployment
+  secrets management.
