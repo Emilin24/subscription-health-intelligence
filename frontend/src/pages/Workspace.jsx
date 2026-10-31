@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { get, post } from '../lib/api';
+import { get, post, patch } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import {
   PageTitle,
@@ -10,21 +10,27 @@ import {
   Empty
 } from '../components/UI';
 
-// ==========================================
-// DASHBOARD
-// ==========================================
+const money = value =>
+  `₹${Number(value || 0).toLocaleString('en-IN', {
+    maximumFractionDigits: 2
+  })}`;
+
+
+// -----------------------------------------------------------------------------
+// Dashboard
+// -----------------------------------------------------------------------------
 
 export function Dashboard() {
   const [data, setData] = useState(null);
-  const [err, setErr] = useState('');
+  const [error, setError] = useState('');
 
   useEffect(() => {
     get('/reports/overview')
       .then(setData)
-      .catch(e => setErr(e.message));
+      .catch(e => setError(e.message));
   }, []);
 
-  if (err) return <ErrorBox error={err} />;
+  if (error) return <ErrorBox error={error} />;
   if (!data) return <Loading />;
 
   return (
@@ -43,12 +49,12 @@ export function Dashboard() {
 
         <Stat
           label="Payments received"
-          value={`₹${Number(data.revenue_received).toLocaleString('en-IN')}`}
+          value={money(data.revenue_received)}
         />
 
         <Stat
           label="Outstanding"
-          value={`₹${Number(data.outstanding).toLocaleString('en-IN')}`}
+          value={money(data.outstanding)}
         />
 
         <Stat
@@ -61,8 +67,8 @@ export function Dashboard() {
         <h3>Operations at a glance</h3>
 
         <p className="muted">
-          Use the navigation to manage catalogue, subscriptions,
-          billing and customer accounts.
+          Manage products, plans, customers, subscriptions and billing
+          from the workspace.
         </p>
 
         <div className="quick-grid">
@@ -82,59 +88,871 @@ export function Dashboard() {
 }
 
 
-// ==========================================
-// CATALOGUE CONFIGURATION
-// ==========================================
+// -----------------------------------------------------------------------------
+// Shared data table
+// -----------------------------------------------------------------------------
 
-const config = {
-  products: {
-    title: 'Products',
-    subtitle: 'Manage subscription products and add-ons.',
-    endpoint: '/products',
+export function DataTable({
+  rows,
+  columns,
+  renderActions
+}) {
+  if (!rows?.length) return <Empty />;
 
-    fields: [
-      ['name', 'Product name', 'text'],
-      ['product_type', 'Type', 'text'],
-      ['sales_price', 'Sales price', 'number'],
-      ['cost_price', 'Cost price', 'number'],
-      ['notes', 'Notes', 'text']
-    ],
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            {columns.map(column => (
+              <th key={column}>
+                {column.replaceAll('_', ' ')}
+              </th>
+            ))}
 
-    columns: [
-      'name',
-      'product_type',
-      'sales_price',
-      'cost_price',
-      'is_active'
-    ],
+            {renderActions && <th>Actions</th>}
+          </tr>
+        </thead>
 
-    admin: true
-  },
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={row.id || index}>
+              {columns.map(column => {
+                const value = row[column];
 
-  plans: {
-    title: 'Plans',
-    subtitle: 'Configure recurring intervals and subscription rules.',
-    endpoint: '/plans',
+                return (
+                  <td key={column}>
+                    {
+                      value === true
+                        ? 'Yes'
+                        : value === false
+                          ? 'No'
+                          : typeof value === 'object' && value !== null
+                            ? JSON.stringify(value)
+                            : String(value ?? '—')
+                    }
+                  </td>
+                );
+              })}
 
-    fields: [
-      ['name', 'Plan name', 'text'],
-      ['description', 'Description', 'text'],
-      ['billing_interval', 'Billing interval (daily/weekly/monthly/yearly)', 'text'],
-      ['price', 'Price', 'number'],
-      ['minimum_quantity', 'Minimum quantity', 'number']
-    ],
+              {renderActions && (
+                <td>{renderActions(row)}</td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
-    columns: [
-      'name',
-      'billing_interval',
-      'price',
-      'minimum_quantity',
-      'is_active'
-    ],
 
-    admin: true
-  },
+// -----------------------------------------------------------------------------
+// Products and plans
+// -----------------------------------------------------------------------------
 
+export function CataloguePage({ kind }) {
+  if (kind === 'products') return <ProductsPage />;
+  if (kind === 'plans') return <PlansPage />;
+
+  return <SimpleCataloguePage kind={kind} />;
+}
+
+
+// -----------------------------------------------------------------------------
+// Product management and variants
+// -----------------------------------------------------------------------------
+
+function ProductsPage() {
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === 'admin';
+
+  const [products, setProducts] = useState([]);
+  const [variants, setVariants] = useState([]);
+
+  const [form, setForm] = useState({
+    name: '',
+    product_type: 'subscription',
+    sales_price: '',
+    cost_price: '',
+    notes: ''
+  });
+
+  const [variantForm, setVariantForm] = useState({
+    product_id: '',
+    variant_name: '',
+    additional_price: '0'
+  });
+
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+
+
+  async function refresh() {
+    try {
+      const [productRows, variantRows] = await Promise.all([
+        get('/products'),
+        get('/product-variants')
+      ]);
+
+      setProducts(productRows || []);
+      setVariants(variantRows || []);
+      setError('');
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+
+  async function createProduct(event) {
+    event.preventDefault();
+
+    setBusy(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await post('/products', {
+        ...form,
+        sales_price: Number(form.sales_price),
+        cost_price: Number(form.cost_price || 0)
+      });
+
+      setForm({
+        name: '',
+        product_type: 'subscription',
+        sales_price: '',
+        cost_price: '',
+        notes: ''
+      });
+
+      setMessage(
+        'Product created. You can now add variants below.'
+      );
+
+      await refresh();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+
+  async function createVariant(event) {
+    event.preventDefault();
+
+    setBusy(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await post('/product-variants', {
+        ...variantForm,
+        additional_price: Number(
+          variantForm.additional_price || 0
+        )
+      });
+
+      setVariantForm({
+        product_id: '',
+        variant_name: '',
+        additional_price: '0'
+      });
+
+      setMessage('Product variant created.');
+
+      await refresh();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+
+  async function toggleProduct(product) {
+    try {
+      await patch(
+        `/products/${product.id}`,
+        { is_active: !product.is_active }
+      );
+
+      await refresh();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+
+  async function toggleVariant(variant) {
+    try {
+      await patch(
+        `/product-variants/${variant.id}`,
+        { is_active: !variant.is_active }
+      );
+
+      await refresh();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+
+  const productName = id =>
+    products.find(product => product.id === id)?.name
+    || 'Unknown product';
+
+
+  return (
+    <>
+      <PageTitle
+        title="Products"
+        subtitle="Create products, set sales and cost prices, and manage priced variants."
+      />
+
+      <ErrorBox error={error} />
+
+      {message && (
+        <div className="success-box">{message}</div>
+      )}
+
+
+      {isAdmin ? (
+        <div className="two-col">
+
+          <Card>
+            <h3>Add product</h3>
+
+            <form
+              className="stack-form"
+              onSubmit={createProduct}
+            >
+              <label>
+                Product name
+                <input
+                  required
+                  maxLength="200"
+                  value={form.name}
+                  onChange={e =>
+                    setForm({
+                      ...form,
+                      name: e.target.value
+                    })
+                  }
+                />
+              </label>
+
+              <label>
+                Product type
+
+                <select
+                  required
+                  value={form.product_type}
+                  onChange={e =>
+                    setForm({
+                      ...form,
+                      product_type: e.target.value
+                    })
+                  }
+                >
+                  <option value="subscription">
+                    Subscription
+                  </option>
+
+                  <option value="add_on">
+                    Add-on
+                  </option>
+
+                  <option value="one_time">
+                    One-time
+                  </option>
+
+                  <option value="other">
+                    Other
+                  </option>
+                </select>
+              </label>
+
+              <label>
+                Sales price (₹)
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  required
+                  value={form.sales_price}
+                  onChange={e =>
+                    setForm({
+                      ...form,
+                      sales_price: e.target.value
+                    })
+                  }
+                />
+              </label>
+
+              <label>
+                Cost price (₹)
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.cost_price}
+                  onChange={e =>
+                    setForm({
+                      ...form,
+                      cost_price: e.target.value
+                    })
+                  }
+                />
+              </label>
+
+              <label>
+                Notes
+                <textarea
+                  rows="3"
+                  value={form.notes}
+                  onChange={e =>
+                    setForm({
+                      ...form,
+                      notes: e.target.value
+                    })
+                  }
+                />
+              </label>
+
+              <button
+                className="btn primary"
+                disabled={busy}
+              >
+                {busy ? 'Saving…' : 'Create product'}
+              </button>
+            </form>
+          </Card>
+
+
+          <Card>
+            <h3>Add product variant</h3>
+
+            <p className="muted">
+              A variant adds its additional price to the
+              product's base sales price.
+            </p>
+
+            <form
+              className="stack-form"
+              onSubmit={createVariant}
+            >
+              <label>
+                Product
+
+                <select
+                  required
+                  value={variantForm.product_id}
+                  onChange={e =>
+                    setVariantForm({
+                      ...variantForm,
+                      product_id: e.target.value
+                    })
+                  }
+                >
+                  <option value="">Select product</option>
+
+                  {products.map(product => (
+                    <option
+                      key={product.id}
+                      value={product.id}
+                    >
+                      {product.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                Variant name
+
+                <input
+                  required
+                  maxLength="150"
+                  placeholder="e.g. Odoo"
+                  value={variantForm.variant_name}
+                  onChange={e =>
+                    setVariantForm({
+                      ...variantForm,
+                      variant_name: e.target.value
+                    })
+                  }
+                />
+              </label>
+
+              <label>
+                Additional price (₹)
+
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  required
+                  value={variantForm.additional_price}
+                  onChange={e =>
+                    setVariantForm({
+                      ...variantForm,
+                      additional_price: e.target.value
+                    })
+                  }
+                />
+              </label>
+
+              <button
+                className="btn primary"
+                disabled={busy || products.length === 0}
+              >
+                {busy ? 'Saving…' : 'Add variant'}
+              </button>
+            </form>
+          </Card>
+
+        </div>
+      ) : (
+        <Card>
+          <p className="muted">
+            Staff can view the product catalogue and variants.
+            Only administrators can create or change them.
+          </p>
+        </Card>
+      )}
+
+
+      <Card>
+        <h3>Product catalogue</h3>
+
+        <DataTable
+          rows={products}
+          columns={[
+            'name',
+            'product_type',
+            'sales_price',
+            'cost_price',
+            'is_active'
+          ]}
+          renderActions={
+            isAdmin
+              ? product => (
+                <button
+                  className="btn small"
+                  onClick={() => toggleProduct(product)}
+                >
+                  {product.is_active ? 'Deactivate' : 'Activate'}
+                </button>
+              )
+              : null
+          }
+        />
+      </Card>
+
+
+      <Card>
+        <h3>Product variants</h3>
+
+        <DataTable
+          rows={variants.map(variant => ({
+            ...variant,
+            product_name: productName(variant.product_id)
+          }))}
+          columns={[
+            'product_name',
+            'variant_name',
+            'additional_price',
+            'is_active'
+          ]}
+          renderActions={
+            isAdmin
+              ? variant => (
+                <button
+                  className="btn small"
+                  onClick={() => toggleVariant(variant)}
+                >
+                  {variant.is_active ? 'Deactivate' : 'Activate'}
+                </button>
+              )
+              : null
+          }
+        />
+      </Card>
+    </>
+  );
+}
+
+
+// -----------------------------------------------------------------------------
+// Subscription plan management
+// -----------------------------------------------------------------------------
+
+function PlansPage() {
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === 'admin';
+
+  const initialForm = {
+    name: '',
+    description: '',
+    billing_interval: 'monthly',
+    price: '',
+    minimum_quantity: 1,
+    available_from: '',
+    available_until: '',
+    auto_close: false,
+    allow_early_close: true,
+    allow_pause: true,
+    allow_renewal: true,
+    is_active: true
+  };
+
+  const [form, setForm] = useState(initialForm);
+  const [plans, setPlans] = useState([]);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+
+
+  async function refresh() {
+    try {
+      setPlans(await get('/plans') || []);
+      setError('');
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+
+  async function createPlan(event) {
+    event.preventDefault();
+
+    setBusy(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await post('/plans', {
+        ...form,
+        price: Number(form.price),
+        minimum_quantity: Number(form.minimum_quantity),
+        available_from: form.available_from || null,
+        available_until: form.available_until || null
+      });
+
+      setForm(initialForm);
+      setMessage('Subscription plan created.');
+
+      await refresh();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+
+  async function togglePlan(plan) {
+    try {
+      await patch(
+        `/plans/${plan.id}`,
+        { is_active: !plan.is_active }
+      );
+
+      await refresh();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+
+  return (
+    <>
+      <PageTitle
+        title="Subscription plans"
+        subtitle="Configure recurring prices, availability dates and subscription lifecycle permissions."
+      />
+
+      <ErrorBox error={error} />
+
+      {message && (
+        <div className="success-box">{message}</div>
+      )}
+
+
+      {isAdmin ? (
+        <Card>
+          <h3>Create subscription plan</h3>
+
+          <form
+            className="stack-form plan-form"
+            onSubmit={createPlan}
+          >
+            <div className="form-grid">
+
+              <label>
+                Plan name
+                <input
+                  required
+                  maxLength="200"
+                  value={form.name}
+                  onChange={e =>
+                    setForm({
+                      ...form,
+                      name: e.target.value
+                    })
+                  }
+                />
+              </label>
+
+              <label>
+                Price (₹)
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  required
+                  value={form.price}
+                  onChange={e =>
+                    setForm({
+                      ...form,
+                      price: e.target.value
+                    })
+                  }
+                />
+              </label>
+
+              <label>
+                Billing interval
+
+                <select
+                  value={form.billing_interval}
+                  onChange={e =>
+                    setForm({
+                      ...form,
+                      billing_interval: e.target.value
+                    })
+                  }
+                >
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="yearly">Yearly</option>
+                </select>
+              </label>
+
+              <label>
+                Minimum quantity
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  required
+                  value={form.minimum_quantity}
+                  onChange={e =>
+                    setForm({
+                      ...form,
+                      minimum_quantity: e.target.value
+                    })
+                  }
+                />
+              </label>
+
+              <label>
+                Available from
+                <input
+                  type="date"
+                  value={form.available_from}
+                  onChange={e =>
+                    setForm({
+                      ...form,
+                      available_from: e.target.value
+                    })
+                  }
+                />
+              </label>
+
+              <label>
+                Available until
+                <input
+                  type="date"
+                  min={form.available_from || undefined}
+                  value={form.available_until}
+                  onChange={e =>
+                    setForm({
+                      ...form,
+                      available_until: e.target.value
+                    })
+                  }
+                />
+              </label>
+
+            </div>
+
+
+            <label>
+              Description
+
+              <textarea
+                rows="3"
+                value={form.description}
+                onChange={e =>
+                  setForm({
+                    ...form,
+                    description: e.target.value
+                  })
+                }
+              />
+            </label>
+
+
+            <div className="permission-grid">
+
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={form.auto_close}
+                  onChange={e =>
+                    setForm({
+                      ...form,
+                      auto_close: e.target.checked
+                    })
+                  }
+                />
+                Automatically close when availability ends
+              </label>
+
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={form.allow_early_close}
+                  onChange={e =>
+                    setForm({
+                      ...form,
+                      allow_early_close: e.target.checked
+                    })
+                  }
+                />
+                Allow early closure
+              </label>
+
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={form.allow_pause}
+                  onChange={e =>
+                    setForm({
+                      ...form,
+                      allow_pause: e.target.checked
+                    })
+                  }
+                />
+                Allow subscription pause
+              </label>
+
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={form.allow_renewal}
+                  onChange={e =>
+                    setForm({
+                      ...form,
+                      allow_renewal: e.target.checked
+                    })
+                  }
+                />
+                Allow renewal
+              </label>
+
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={form.is_active}
+                  onChange={e =>
+                    setForm({
+                      ...form,
+                      is_active: e.target.checked
+                    })
+                  }
+                />
+                Plan is active and available
+              </label>
+
+            </div>
+
+
+            <button
+              className="btn primary"
+              disabled={busy}
+            >
+              {busy ? 'Saving…' : 'Create plan'}
+            </button>
+          </form>
+        </Card>
+      ) : (
+        <Card>
+          <p className="muted">
+            Staff can view available plans. Only administrators
+            can create or change plan configuration.
+          </p>
+        </Card>
+      )}
+
+
+      <Card>
+        <h3>Existing plans</h3>
+
+        <DataTable
+          rows={plans}
+          columns={[
+            'name',
+            'billing_interval',
+            'price',
+            'minimum_quantity',
+            'available_from',
+            'available_until',
+            'auto_close',
+            'allow_early_close',
+            'allow_pause',
+            'allow_renewal',
+            'is_active'
+          ]}
+          renderActions={
+            isAdmin
+              ? plan => (
+                <button
+                  className="btn small"
+                  onClick={() => togglePlan(plan)}
+                >
+                  {plan.is_active ? 'Deactivate' : 'Activate'}
+                </button>
+              )
+              : null
+          }
+        />
+      </Card>
+    </>
+  );
+}
+
+
+// -----------------------------------------------------------------------------
+// Other catalogue sections: customers, taxes and discounts
+// -----------------------------------------------------------------------------
+
+const simpleConfig = {
   customers: {
     title: 'Customers',
     subtitle: 'Customer records and billing details.',
@@ -145,22 +963,24 @@ const config = {
       ['email', 'Email', 'email'],
       ['company_name', 'Company name', 'text'],
       ['contact_name', 'Contact name', 'text'],
-      ['phone', 'Phone', 'text']
+      ['phone', 'Phone', 'text'],
+      ['billing_address', 'Billing address', 'text']
     ],
 
     columns: [
       'name',
       'email',
+      'company_name',
       'phone',
       'created_at'
     ],
 
-    admin: false
+    adminOnly: false
   },
 
   taxes: {
     title: 'Taxes',
-    subtitle: 'Configure tax rates applied to invoice line items.',
+    subtitle: 'Tax rates configured by administrators.',
     endpoint: '/taxes',
 
     fields: [
@@ -174,12 +994,12 @@ const config = {
       'is_active'
     ],
 
-    admin: true
+    adminOnly: true
   },
 
   discounts: {
     title: 'Discounts',
-    subtitle: 'Create fixed or percentage promotions.',
+    subtitle: 'Promotional rules configured by administrators.',
     endpoint: '/discounts',
 
     fields: [
@@ -187,114 +1007,109 @@ const config = {
       ['discount_type', 'Type (fixed/percentage)', 'text'],
       ['discount_value', 'Value', 'number'],
       ['minimum_purchase', 'Minimum purchase', 'number'],
-      ['minimum_quantity', 'Minimum quantity', 'number']
+      ['minimum_quantity', 'Minimum quantity', 'number'],
+      ['start_date', 'Start date', 'date'],
+      ['end_date', 'End date', 'date'],
+      ['usage_limit', 'Usage limit', 'number']
     ],
 
     columns: [
       'name',
       'discount_type',
       'discount_value',
+      'minimum_purchase',
+      'minimum_quantity',
       'start_date',
       'end_date',
+      'usage_limit',
       'is_active'
     ],
 
-    admin: true
+    adminOnly: true
   }
 };
 
 
-// ==========================================
-// CATALOGUE PAGES
-// Products, Plans, Customers, Taxes, Discounts
-// ==========================================
-
-export function CataloguePage({ kind }) {
+function SimpleCataloguePage({ kind }) {
   const { profile } = useAuth();
-
-  const c = config[kind];
+  const config = simpleConfig[kind];
 
   const isAdmin = profile?.role === 'admin';
+  const canCreate = !config.adminOnly || isAdmin;
 
   const [rows, setRows] = useState([]);
   const [form, setForm] = useState({});
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+
 
   async function refresh() {
     try {
-      const result = await get(c.endpoint);
-
-      setRows(result || []);
+      setRows(await get(config.endpoint) || []);
       setError('');
     } catch (e) {
       setError(e.message);
     }
   }
 
+
   useEffect(() => {
     refresh();
   }, [kind]);
 
-  async function submit(e) {
-    e.preventDefault();
 
-    setBusy(true);
-    setError('');
+  async function submit(event) {
+    event.preventDefault();
 
     try {
       const payload = { ...form };
 
-      for (const k of [
-        'sales_price',
-        'cost_price',
-        'price',
-        'minimum_quantity',
+      [
+        'tax_rate',
         'discount_value',
         'minimum_purchase',
-        'tax_rate'
-      ]) {
-        if (payload[k] !== undefined && payload[k] !== '') {
-          payload[k] = Number(payload[k]);
+        'minimum_quantity',
+        'usage_limit'
+      ].forEach(key => {
+        if (
+          payload[key] !== undefined &&
+          payload[key] !== ''
+        ) {
+          payload[key] = Number(payload[key]);
         }
-      }
+      });
 
-      if (kind === 'plans') {
+      if (kind === 'discounts') {
+        payload.start_date = payload.start_date || null;
+        payload.end_date = payload.end_date || null;
         payload.minimum_quantity =
           payload.minimum_quantity || 1;
+        payload.minimum_purchase =
+          payload.minimum_purchase || 0;
+        payload.applies_to = 'subscription';
       }
 
-      await post(c.endpoint, payload);
+      await post(config.endpoint, payload);
 
       setForm({});
-
       await refresh();
-
     } catch (e) {
       setError(e.message);
-    } finally {
-      setBusy(false);
     }
   }
 
-  if (!c) {
-    return <ErrorBox error="Invalid catalogue section." />;
-  }
-
-  const canCreate = !c.admin || isAdmin;
 
   return (
     <>
       <PageTitle
-        title={c.title}
-        subtitle={c.subtitle}
+        title={config.title}
+        subtitle={config.subtitle}
       />
 
       <ErrorBox error={error} />
 
       <div className="two-col">
 
-        {canCreate && (
+        {canCreate ? (
           <Card>
             <h3>Add {kind.slice(0, -1)}</h3>
 
@@ -302,58 +1117,83 @@ export function CataloguePage({ kind }) {
               className="stack-form"
               onSubmit={submit}
             >
-              {c.fields.map(([name, label, type]) => (
+              {config.fields.map(([name, label, type]) => (
                 <label key={name}>
                   {label}
 
-                  <input
-                    type={type}
-                    required={![
-                      'notes',
-                      'description',
-                      'cost_price',
-                      'minimum_purchase'
-                    ].includes(name)}
-                    step={type === 'number' ? '0.01' : undefined}
-                    value={form[name] ?? ''}
-                    onChange={e =>
-                      setForm({
-                        ...form,
-                        [name]: e.target.value
-                      })
-                    }
-                  />
+                  {name === 'discount_type' ? (
+                    <select
+                      required
+                      value={form[name] || 'percentage'}
+                      onChange={e =>
+                        setForm({
+                          ...form,
+                          [name]: e.target.value
+                        })
+                      }
+                    >
+                      <option value="fixed">
+                        Fixed amount
+                      </option>
+
+                      <option value="percentage">
+                        Percentage
+                      </option>
+                    </select>
+                  ) : (
+                    <input
+                      type={type}
+                      required={
+                        ![
+                          'company_name',
+                          'contact_name',
+                          'phone',
+                          'billing_address',
+                          'minimum_purchase',
+                          'minimum_quantity',
+                          'usage_limit',
+                          'start_date',
+                          'end_date'
+                        ].includes(name)
+                      }
+                      step={
+                        type === 'number'
+                          ? '0.01'
+                          : undefined
+                      }
+                      value={form[name] ?? ''}
+                      onChange={e =>
+                        setForm({
+                          ...form,
+                          [name]: e.target.value
+                        })
+                      }
+                    />
+                  )}
                 </label>
               ))}
 
-              <button
-                className="btn primary"
-                disabled={busy}
-              >
-                {busy ? 'Saving…' : 'Save'}
+              <button className="btn primary">
+                Save
               </button>
             </form>
           </Card>
-        )}
-
-        {!canCreate && (
+        ) : (
           <Card>
-            <h3>Read-only access</h3>
-
             <p className="muted">
-              Staff members can view this catalogue,
-              but only administrators can create or modify
-              these records.
+              Only administrators can create or modify
+              {` ${config.title.toLowerCase()}.`}
             </p>
           </Card>
         )}
 
+
         <Card>
-          <h3>Existing {c.title.toLowerCase()}</h3>
+          <h3>Existing {config.title.toLowerCase()}</h3>
 
           <DataTable
             rows={rows}
-            columns={c.columns}
+            columns={config.columns}
           />
         </Card>
 
@@ -363,9 +1203,9 @@ export function CataloguePage({ kind }) {
 }
 
 
-// ==========================================
-// GENERIC TABLE
-// ==========================================
+// -----------------------------------------------------------------------------
+// Generic table page
+// -----------------------------------------------------------------------------
 
 export function GenericTable({
   title,
@@ -377,17 +1217,10 @@ export function GenericTable({
   const [rows, setRows] = useState([]);
   const [error, setError] = useState('');
 
-  async function refresh() {
-    try {
-      setRows(await get(endpoint) || []);
-      setError('');
-    } catch (e) {
-      setError(e.message);
-    }
-  }
-
   useEffect(() => {
-    refresh();
+    get(endpoint)
+      .then(data => setRows(data || []))
+      .catch(e => setError(e.message));
   }, [endpoint]);
 
   return (
@@ -411,50 +1244,9 @@ export function GenericTable({
 }
 
 
-// ==========================================
-// DATA TABLE
-// ==========================================
-
-export function DataTable({ rows, columns }) {
-  if (!rows?.length) {
-    return <Empty />;
-  }
-
-  return (
-    <div className="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            {columns.map(c => (
-              <th key={c}>
-                {c.replaceAll('_', ' ')}
-              </th>
-            ))}
-          </tr>
-        </thead>
-
-        <tbody>
-          {rows.map((r, i) => (
-            <tr key={r.id || i}>
-              {columns.map(c => (
-                <td key={c}>
-                  {typeof r[c] === 'object' && r[c] !== null
-                    ? JSON.stringify(r[c])
-                    : String(r[c] ?? '—')}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-
-// ==========================================
-// SUBSCRIPTIONS
-// ==========================================
+// -----------------------------------------------------------------------------
+// Subscriptions
+// -----------------------------------------------------------------------------
 
 export function Subscriptions() {
   const [rows, setRows] = useState([]);
@@ -463,8 +1255,8 @@ export function Subscriptions() {
 
   const [customer, setCustomer] = useState('');
   const [plan, setPlan] = useState('');
-
   const [error, setError] = useState('');
+
 
   async function refresh() {
     try {
@@ -477,19 +1269,20 @@ export function Subscriptions() {
       setRows(a || []);
       setCustomers(b || []);
       setPlans(c || []);
-
       setError('');
     } catch (e) {
       setError(e.message);
     }
   }
 
+
   useEffect(() => {
     refresh();
   }, []);
 
-  async function create(e) {
-    e.preventDefault();
+
+  async function create(event) {
+    event.preventDefault();
 
     try {
       await post('/subscriptions', {
@@ -502,11 +1295,11 @@ export function Subscriptions() {
       setPlan('');
 
       await refresh();
-
     } catch (e) {
       setError(e.message);
     }
   }
+
 
   return (
     <>
@@ -546,7 +1339,7 @@ export function Subscriptions() {
 
             {plans.map(x => (
               <option value={x.id} key={x.id}>
-                {x.name} — ₹{x.price}/{x.billing_interval}
+                {x.name} — {money(x.price)}/{x.billing_interval}
               </option>
             ))}
           </select>
@@ -575,19 +1368,19 @@ export function Subscriptions() {
 }
 
 
-// ==========================================
-// BILLING AND PAYMENTS
-// ==========================================
+// -----------------------------------------------------------------------------
+// Invoices and payments
+// -----------------------------------------------------------------------------
 
 export function Billing() {
   const [rows, setRows] = useState([]);
   const [payments, setPayments] = useState([]);
-
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
   const [invoice, setInvoice] = useState('');
   const [amount, setAmount] = useState('');
+
 
   async function refresh() {
     try {
@@ -598,29 +1391,29 @@ export function Billing() {
 
       setRows(a || []);
       setPayments(b || []);
-
       setError('');
     } catch (e) {
       setError(e.message);
     }
   }
 
+
   useEffect(() => {
     refresh();
   }, []);
 
-  async function run() {
+
+  async function runBilling() {
     setBusy(true);
 
     try {
-      const r = await post('/billing/run', {});
+      const result = await post('/billing/run', {});
 
       setError(
-        `Billing run complete: ${r.count} invoice(s) created.`
+        `Billing run complete: ${result.count} invoice(s) created.`
       );
 
       await refresh();
-
     } catch (e) {
       setError(e.message);
     } finally {
@@ -628,8 +1421,9 @@ export function Billing() {
     }
   }
 
-  async function pay(e) {
-    e.preventDefault();
+
+  async function recordPayment(event) {
+    event.preventDefault();
 
     try {
       await post('/payments', {
@@ -642,11 +1436,11 @@ export function Billing() {
       setAmount('');
 
       await refresh();
-
     } catch (e) {
       setError(e.message);
     }
   }
+
 
   return (
     <>
@@ -656,7 +1450,7 @@ export function Billing() {
         action={
           <button
             className="btn primary"
-            onClick={run}
+            onClick={runBilling}
             disabled={busy}
           >
             {busy ? 'Running…' : 'Run billing'}
@@ -671,7 +1465,7 @@ export function Billing() {
 
         <form
           className="inline-form"
-          onSubmit={pay}
+          onSubmit={recordPayment}
         >
           <select
             required
@@ -687,7 +1481,7 @@ export function Billing() {
               )
               .map(x => (
                 <option key={x.id} value={x.id}>
-                  {x.invoice_number} · ₹{x.balance_due ?? x.total}
+                  {x.invoice_number} · {money(x.balance_due ?? x.total)}
                 </option>
               ))}
           </select>
@@ -708,6 +1502,7 @@ export function Billing() {
         </form>
       </Card>
 
+
       <Card>
         <h3>Invoices</h3>
 
@@ -724,6 +1519,7 @@ export function Billing() {
           ]}
         />
       </Card>
+
 
       <Card>
         <h3>Payments</h3>
@@ -744,16 +1540,16 @@ export function Billing() {
 }
 
 
-// ==========================================
-// QUOTATIONS
-// ==========================================
+// -----------------------------------------------------------------------------
+// Quotations
+// -----------------------------------------------------------------------------
 
 export function Quotations() {
   const [rows, setRows] = useState([]);
   const [customers, setCustomers] = useState([]);
-
   const [customer, setCustomer] = useState('');
   const [error, setError] = useState('');
+
 
   async function refresh() {
     try {
@@ -764,19 +1560,20 @@ export function Quotations() {
 
       setRows(a || []);
       setCustomers(b || []);
-
       setError('');
     } catch (e) {
       setError(e.message);
     }
   }
 
+
   useEffect(() => {
     refresh();
   }, []);
 
-  async function create(e) {
-    e.preventDefault();
+
+  async function create(event) {
+    event.preventDefault();
 
     try {
       await post('/quotations', {
@@ -790,22 +1587,21 @@ export function Quotations() {
       });
 
       await refresh();
-
     } catch (e) {
       setError(e.message);
     }
   }
+
 
   async function convert(id) {
     try {
       await post(`/quotations/${id}/convert`, {});
-
       await refresh();
-
     } catch (e) {
       setError(e.message);
     }
   }
+
 
   return (
     <>
@@ -841,6 +1637,7 @@ export function Quotations() {
         </form>
       </Card>
 
+
       <Card>
         <div className="table-wrap">
           <table>
@@ -860,8 +1657,7 @@ export function Quotations() {
                   <td>{x.quotation_number}</td>
                   <td>{x.customers?.name || '—'}</td>
                   <td>{x.status}</td>
-                  <td>{x.total_amount}</td>
-
+                  <td>{money(x.total_amount)}</td>
                   <td>
                     <button
                       className="btn small"
@@ -881,14 +1677,15 @@ export function Quotations() {
 }
 
 
-// ==========================================
-// SUBSCRIPTION HEALTH
-// ==========================================
+// -----------------------------------------------------------------------------
+// Subscription health
+// -----------------------------------------------------------------------------
 
 export function Health() {
   const [summary, setSummary] = useState(null);
   const [rows, setRows] = useState([]);
   const [error, setError] = useState('');
+
 
   async function refresh() {
     try {
@@ -899,29 +1696,27 @@ export function Health() {
 
       setSummary(a);
       setRows(b || []);
-
       setError('');
     } catch (e) {
       setError(e.message);
     }
   }
 
+
   useEffect(() => {
     refresh();
   }, []);
 
-  async function recalc() {
+
+  async function recalculate() {
     try {
       await post('/health/recalculate', {});
-
       await refresh();
-
-      setError('Health scores recalculated.');
-
     } catch (e) {
       setError(e.message);
     }
   }
+
 
   return (
     <>
@@ -931,7 +1726,7 @@ export function Health() {
         action={
           <button
             className="btn primary"
-            onClick={recalc}
+            onClick={recalculate}
           >
             Recalculate scores
           </button>
@@ -952,13 +1747,15 @@ export function Health() {
             value={`${summary.average}/100`}
           />
 
-          {Object.entries(summary.counts).map(([k, v]) => (
-            <Stat
-              key={k}
-              label={k}
-              value={v}
-            />
-          ))}
+          {Object.entries(summary.counts || {}).map(
+            ([key, value]) => (
+              <Stat
+                key={key}
+                label={key}
+                value={value}
+              />
+            )
+          )}
         </div>
       )}
 
@@ -978,9 +1775,9 @@ export function Health() {
 }
 
 
-// ==========================================
-// REPORTS
-// ==========================================
+// -----------------------------------------------------------------------------
+// Reports
+// -----------------------------------------------------------------------------
 
 export function Reports() {
   const [data, setData] = useState(null);
@@ -991,6 +1788,7 @@ export function Reports() {
       .then(setData)
       .catch(e => setError(e.message));
   }, []);
+
 
   return (
     <>
@@ -1003,15 +1801,14 @@ export function Reports() {
 
       {data && (
         <div className="stat-grid">
-          {Object.entries(data).map(([k, v]) => (
+          {Object.entries(data).map(([key, value]) => (
             <Stat
-              key={k}
-              label={k.replaceAll('_', ' ')}
+              key={key}
+              label={key.replaceAll('_', ' ')}
               value={
-                (typeof v === 'number' && k.includes('revenue')) ||
-                k === 'outstanding'
-                  ? `₹${Number(v).toLocaleString('en-IN')}`
-                  : v
+                key === 'outstanding' || key.includes('revenue')
+                  ? money(value)
+                  : value
               }
             />
           ))}
@@ -1030,16 +1827,16 @@ export function Reports() {
 }
 
 
-// ==========================================
-// CUSTOMER PORTAL
-// ==========================================
+// -----------------------------------------------------------------------------
+// Customer portal
+// -----------------------------------------------------------------------------
 
 export function Portal() {
-  const [subs, setSubs] = useState([]);
+  const [subscriptions, setSubscriptions] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [payments, setPayments] = useState([]);
-
   const [error, setError] = useState('');
+
 
   useEffect(() => {
     Promise.all([
@@ -1048,12 +1845,13 @@ export function Portal() {
       get('/portal/payments')
     ])
       .then(([a, b, c]) => {
-        setSubs(a || []);
+        setSubscriptions(a || []);
         setInvoices(b || []);
         setPayments(c || []);
       })
       .catch(e => setError(e.message));
   }, []);
+
 
   return (
     <>
@@ -1068,7 +1866,7 @@ export function Portal() {
         <h3>My subscriptions</h3>
 
         <DataTable
-          rows={subs}
+          rows={subscriptions}
           columns={[
             'subscription_number',
             'status',
@@ -1112,4 +1910,3 @@ export function Portal() {
     </>
   );
 }
-
