@@ -31,11 +31,11 @@ export default function Landing({ session }) {
             <h1>Know the health of every <span>subscription.</span></h1>
             <p className="hero-description">A clearer view of subscription stability. Analyse payment reliability, renewal behaviour and activity to identify accounts that may need attention.</p>
             <div className="hero-actions"><Link to="/signup" className="button">Get started <ArrowRight size={17} /></Link><Link to="/login" className="button button-outline">Sign in</Link></div>
-            <div className="hero-note"><CheckCircle2 size={16} /> Scoring insights from 0–100</div>
+            <div className="hero-note"><CheckCircle2 size={16} /> A clear score from 0–100</div>
           </div>
 
           <div className="score-preview" aria-label="Illustrative subscription health score preview">
-            <div className="preview-top"><div><span className="preview-kicker">HEALTH OVERVIEW</span><h3>Subscription health</h3></div><span className="live-pill"><span /> Overview</span></div>
+            <div className="preview-top"><div><span className="preview-kicker">HEALTH OVERVIEW</span><h3>Subscription health</h3></div><span className="live-pill"><span /> Sample</span></div>
             <div className="preview-score-row"><div className="score-ring"><div><strong>86</strong><small>/ 100</small></div></div><div className="preview-score-copy"><span className="status-chip healthy">Healthy</span><h4>Strong subscription health</h4><p>Illustrative score breakdown</p></div></div>
             <div className="preview-metrics">
               {[ ["Payment reliability", "92%", "92%"], ["Renewal behaviour", "84%", "84%"], ["Subscription activity", "88%", "88%"] ].map(([label,value,width]) => <div className="metric-line" key={label}><div><span>{label}</span><b>{value}</b></div><div className="metric-track"><span style={{ width }} /></div></div>)}
@@ -59,7 +59,7 @@ export default function Landing({ session }) {
 
         <section className="risk-section"><div><span className="section-label">A SIMPLE RISK LANGUAGE</span><h2>Understand the score<br/>at a glance.</h2><p>Each subscription is grouped into a health category based on its calculated score.</p></div><div className="risk-list"><div><span className="risk-dot dot-healthy"/><b>80–100</b><span>Healthy</span></div><div><span className="risk-dot dot-moderate"/><b>60–79</b><span>Moderate risk</span></div><div><span className="risk-dot dot-risk"/><b>40–59</b><span>At risk</span></div><div><span className="risk-dot dot-critical"/><b>0–39</b><span>Critical</span></div></div></section>
 
-        <section className="cta-section"><div><span className="section-label">GET STARTED</span><h2>Make subscription health<br/>easier to see.</h2><p>Sign in to explore the Subscription Health Intelligence dashboard.</p></div><Link to="/signup" className="button button-light">Create an account <ArrowRight size={17}/></Link></section>
+        <section className="cta-section"><div><span className="section-label">GET STARTED</span><h2>Make subscription health<br/>easier to see.</h2><p>Create an account to explore the Subscription Health Intelligence dashboard.</p></div><Link to="/signup" className="button button-light">Create an account <ArrowRight size={17}/></Link></section>
       </main>
 
       <footer className="site-footer"><Link to="/" className="brand"><span className="brand-mark"><Activity size={18}/></span><span>Brightloop <b>Intelligence</b></span></Link><span>Subscription Health Intelligence · Demo application</span></footer>
